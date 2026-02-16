@@ -34,6 +34,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.updateKey(msg)
 
+	case botStatusMsg:
+		if msg.Err != nil {
+			m.botOnline = false
+			m.botLastErr = msg.Err.Error()
+			m.botLastSync = msg.At
+		} else {
+			m.botOnline = true
+			m.botStats = msg.Stats
+			m.botLastErr = ""
+			m.botLastSync = msg.At
+		}
+		return m, botStatusTickCmd(time.Second)
+
 	case scanFinishedMsg:
 		return m.onScanFinished(msg)
 
@@ -46,8 +59,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("disconnect error: " + msg.Err.Error())
 			return m, nil
 		}
+		if m.inventoryRunning {
+			getBotSyncClient().onStopReading()
+		}
 		m.inventoryRunning = false
 		m.awaitingProbe = false
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
+		m.connecting = false
 		m.status = "Disconnected"
 		m.pushLog("reader disconnected")
 		return m, nil
@@ -60,6 +80,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if !m.reader.IsConnected() {
+			if m.inventoryRunning {
+				getBotSyncClient().onStopReading()
+			}
 			m.inventoryRunning = false
 			m.status = "Reading stopped: reader disconnected"
 			return m, nil
@@ -100,8 +123,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case probeTimeoutMsg:
 		if m.awaitingProbe && !m.inventoryRunning {
 			m.awaitingProbe = false
+			m.pushLog("probe timeout: endpoint did not answer reader protocol")
+			if next, cmd, ok := m.retryNextConnect("probe timeout"); ok {
+				return next, cmd
+			}
 			m.status = "Connected endpoint did not answer reader protocol"
-			m.pushLog("probe timeout: endpoint is likely not ST-8508")
 			return m, disconnectCmd(m.reader)
 		}
 		return m, nil
@@ -139,8 +165,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pushLog("reader error: " + msg.Err.Error())
 		}
 		if !m.reader.IsConnected() {
+			if m.inventoryRunning {
+				getBotSyncClient().onStopReading()
+			}
 			m.inventoryRunning = false
 			m.awaitingProbe = false
+			if !m.connecting {
+				if next, cmd, ok := m.retryNextConnect(msg.Err.Error()); ok {
+					return next, cmd
+				}
+			}
+			m.connecting = false
 			m.status = "Reader connection closed"
 		}
 		return m, waitReaderErrCmd(m.reader.Errors())
@@ -161,6 +196,7 @@ func (m Model) onScanFinished(msg scanFinishedMsg) (tea.Model, tea.Cmd) {
 
 	if msg.Err != nil && !errors.Is(msg.Err, context.DeadlineExceeded) && !errors.Is(msg.Err, context.Canceled) {
 		m.pendingConnect = false
+		m.connecting = false
 		m.status = "Scan failed: " + msg.Err.Error()
 		m.pushLog("scan error: " + msg.Err.Error())
 		return m, nil
@@ -176,6 +212,10 @@ func (m Model) onScanFinished(msg scanFinishedMsg) (tea.Model, tea.Cmd) {
 		m.pushLog("scan done: no candidates")
 		m.pendingConnect = false
 		m.pendingAction = noPendingAction
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
+		m.connecting = false
 		return m, nil
 	}
 
@@ -185,29 +225,37 @@ func (m Model) onScanFinished(msg scanFinishedMsg) (tea.Model, tea.Cmd) {
 
 	if m.pendingConnect {
 		m.pendingConnect = false
-		idx := preferredVerifiedCandidateIndex(m.candidates)
+		idx := preferredCandidateIndex(m.candidates)
 		if idx < 0 {
-			m.status = "No verified reader found. Open Devices page and check network."
-			m.pushLog("quick connect skipped: no verified reader")
+			m.status = "No reader endpoint found."
+			m.pushLog("quick connect skipped: no endpoints")
 			m.pendingAction = noPendingAction
+			m.connectQueue = nil
+			m.connectAttempt = 0
+			m.connectActionLabel = ""
 			return m, nil
 		}
-		ep := reader.Endpoint{Host: m.candidates[idx].Host, Port: m.candidates[idx].Port}
-		m.status = "Quick connecting to " + ep.Address()
-		m.pushLog("quick connect: " + ep.Address())
-		return m, reconnectCmd(m.reader, ep)
+		return m.beginConnectPlan("Quick Connect", idx)
 	}
 
 	return m, nil
 }
 
 func (m Model) onConnectFinished(msg connectFinishedMsg) (tea.Model, tea.Cmd) {
+	m.connecting = false
 	if msg.Err != nil {
-		m.status = "Connect failed: " + msg.Err.Error()
 		m.pushLog("connect error: " + msg.Err.Error())
+		if next, cmd, ok := m.retryNextConnect(msg.Err.Error()); ok {
+			return next, cmd
+		}
+		m.status = "Connect failed: " + msg.Err.Error()
 		m.pendingAction = noPendingAction
 		return m, nil
 	}
+
+	m.connectQueue = nil
+	m.connectAttempt = 0
+	m.connectActionLabel = ""
 
 	m.activeScreen = screenControl
 	m.inventoryRunning = false
@@ -240,6 +288,7 @@ func (m Model) onConnectFinished(msg connectFinishedMsg) (tea.Model, tea.Cmd) {
 		m.protocolBuffer = nil
 		m.status = "Connected. Preparing reader + reading started"
 		m.pushLog(fmt.Sprintf("reading started (poll=%s effective=%s scan=%d)", m.inventoryInterval, m.effectiveInventoryInterval(), m.inventoryScanTime))
+		getBotSyncClient().onStartReading()
 		base = append(base,
 			sendNamedCmdSilent(m.reader, "cfg-work-mode", reader18.SetWorkModeCommand(m.inventoryAddress, []byte{0x00})),
 			sendNamedCmdSilent(m.reader, "cfg-scan-time", reader18.SetScanTimeCommand(m.inventoryAddress, m.inventoryScanTime)),
@@ -270,6 +319,9 @@ func (m Model) onConnectFinished(msg connectFinishedMsg) (tea.Model, tea.Cmd) {
 func (m Model) onCommandSent(msg commandSentMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
 		if strings.HasPrefix(msg.Name, "inventory-") {
+			if m.inventoryRunning {
+				getBotSyncClient().onStopReading()
+			}
 			m.inventoryRunning = false
 			m.status = "Reading stopped: " + msg.Err.Error()
 			m.pushLog("inventory send error: " + msg.Err.Error())
@@ -347,6 +399,7 @@ func (m *Model) handleProtocolFrame(frame reader18.Frame) {
 				m.seenTagEPC[epcText] = struct{}{}
 				m.inventoryTagTotal++
 				newCount++
+				getBotSyncClient().onNewEPC(epcText)
 				m.pushLog(fmt.Sprintf("new tag ant=%d epc=%s rssi=%d total=%d", tag.Antenna, epcText, tag.RSSI, m.inventoryTagTotal))
 			}
 			if newCount > 0 {
@@ -425,6 +478,7 @@ func (m *Model) handleProtocolFrame(frame reader18.Frame) {
 				if _, exists := m.seenTagEPC[epcText]; !exists {
 					m.seenTagEPC[epcText] = struct{}{}
 					m.inventoryTagTotal++
+					getBotSyncClient().onNewEPC(epcText)
 					if m.activeScreen == screenControl {
 						m.status = fmt.Sprintf("New tag: ant=%d epc=%s", result.Antenna, trimText(epcText, 28))
 					}
@@ -578,18 +632,15 @@ func (m Model) runQuickConnect() (tea.Model, tea.Cmd) {
 	}
 
 	if len(m.candidates) > 0 {
-		idx := preferredVerifiedCandidateIndex(m.candidates)
+		idx := preferredCandidateIndex(m.candidates)
 		if idx < 0 {
-			m.status = "No verified reader in cache. Rescanning..."
-			m.pushLog("quick connect requires verified reader")
+			m.status = "No reader in cache. Rescanning..."
+			m.pushLog("quick connect requires at least one endpoint")
 			m.scanning = true
 			m.pendingConnect = true
 			return m, runScanCmd(m.scanOptions)
 		}
-		ep := reader.Endpoint{Host: m.candidates[idx].Host, Port: m.candidates[idx].Port}
-		m.status = "Quick connecting to " + ep.Address()
-		m.pushLog("quick connect: " + ep.Address())
-		return m, reconnectCmd(m.reader, ep)
+		return m.beginConnectPlan("Quick Connect", idx)
 	}
 
 	m.scanning = true
@@ -618,6 +669,9 @@ func (m Model) updateDeviceKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.scanning = true
 		m.pendingConnect = false
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
 		m.status = "Scanning LAN..."
 		m.pushLog("manual scan")
 		return m, runScanCmd(m.scanOptions)
@@ -641,14 +695,7 @@ func (m Model) connectSelectedDevice() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	selected := m.candidates[m.deviceIndex]
-	ep := reader.Endpoint{Host: selected.Host, Port: selected.Port}
-	if !selected.Verified {
-		m.pushLog("warning: connecting to unverified endpoint " + ep.Address())
-	}
-	m.status = "Connecting to " + ep.Address()
-	m.pushLog("manual connect: " + ep.Address())
-	return m, reconnectCmd(m.reader, ep)
+	return m.beginConnectPlan("Manual Connect", m.deviceIndex)
 }
 
 func (m Model) updateControlKeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -869,6 +916,7 @@ func (m Model) runControlAction(index int) (tea.Model, tea.Cmd) {
 		m.protocolBuffer = nil
 		m.status = "Preparing reader + reading started"
 		m.pushLog(fmt.Sprintf("reading started (poll=%s effective=%s scan=%d)", m.inventoryInterval, m.effectiveInventoryInterval(), m.inventoryScanTime))
+		getBotSyncClient().onStartReading()
 		return m, tea.Batch(
 			sendNamedCmdSilent(m.reader, "cfg-work-mode", reader18.SetWorkModeCommand(m.inventoryAddress, []byte{0x00})),
 			sendNamedCmdSilent(m.reader, "cfg-scan-time", reader18.SetScanTimeCommand(m.inventoryAddress, m.inventoryScanTime)),
@@ -885,6 +933,7 @@ func (m Model) runControlAction(index int) (tea.Model, tea.Cmd) {
 		m.inventoryRunning = false
 		m.status = fmt.Sprintf("Reading stopped. rounds=%d tags=%d", m.inventoryRounds, m.inventoryTagTotal)
 		m.pushLog("reading stopped")
+		getBotSyncClient().onStopReading()
 		return m, nil
 
 	case 2:
@@ -911,6 +960,9 @@ func (m Model) runControlAction(index int) (tea.Model, tea.Cmd) {
 
 	case 5:
 		m.pendingConnect = true
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
 		if m.scanning {
 			m.status = "Scan already running, quick-connect queued"
 			return m, nil
@@ -1047,25 +1099,21 @@ func (m Model) requestConnectionForAction(action int, actionName string) (tea.Mo
 	}
 
 	if len(m.candidates) > 0 {
-		idx := preferredVerifiedCandidateIndex(m.candidates)
+		idx := preferredCandidateIndex(m.candidates)
 		if idx < 0 {
 			if m.scanning {
 				m.pendingConnect = true
-				m.status = fmt.Sprintf("%s requested: waiting for verified reader...", actionName)
-				m.pushLog("pending action waiting for verified reader")
+				m.status = fmt.Sprintf("%s requested: waiting for reader...", actionName)
+				m.pushLog("pending action waiting for reader")
 				return m, nil
 			}
 			m.pendingConnect = true
 			m.scanning = true
-			m.status = fmt.Sprintf("%s requested: rescanning for verified reader...", actionName)
-			m.pushLog("pending action triggered scan for verified reader")
+			m.status = fmt.Sprintf("%s requested: rescanning for reader...", actionName)
+			m.pushLog("pending action triggered scan for reader")
 			return m, runScanCmd(m.scanOptions)
 		}
-		candidate := m.candidates[idx]
-		endpoint := reader.Endpoint{Host: candidate.Host, Port: candidate.Port}
-		m.status = fmt.Sprintf("%s requested: connecting to %s", actionName, endpoint.Address())
-		m.pushLog(fmt.Sprintf("pending action %d -> connect %s", action, endpoint.Address()))
-		return m, reconnectCmd(m.reader, endpoint)
+		return m.beginConnectPlan(actionName, idx)
 	}
 
 	if m.scanning {
@@ -1080,6 +1128,148 @@ func (m Model) requestConnectionForAction(action int, actionName string) (tea.Mo
 	m.status = fmt.Sprintf("%s requested: scanning for reader...", actionName)
 	m.pushLog("pending action triggered scan")
 	return m, runScanCmd(m.scanOptions)
+}
+
+func (m Model) beginConnectPlan(actionLabel string, preferredIndex int) (tea.Model, tea.Cmd) {
+	plan := buildConnectPlan(m.candidates, preferredIndex, m.scanOptions.Ports)
+	if len(plan) == 0 {
+		m.status = actionLabel + ": no reachable endpoints"
+		m.pushLog(strings.ToLower(actionLabel) + " failed: no endpoints in plan")
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
+		m.connecting = false
+		return m, nil
+	}
+
+	m.connectQueue = plan
+	m.connectAttempt = 0
+	m.connectActionLabel = actionLabel
+	m.connecting = true
+
+	first := plan[0]
+	m.status = fmt.Sprintf("%s: connecting %s (1/%d)", actionLabel, first.Address(), len(plan))
+	m.pushLog(fmt.Sprintf("%s connect 1/%d -> %s", strings.ToLower(actionLabel), len(plan), first.Address()))
+	return m, reconnectCmd(m.reader, first)
+}
+
+func (m Model) retryNextConnect(reason string) (tea.Model, tea.Cmd, bool) {
+	if len(m.connectQueue) == 0 {
+		return m, nil, false
+	}
+
+	label := strings.TrimSpace(m.connectActionLabel)
+	if label == "" {
+		label = "Connect"
+	}
+	cause := strings.TrimSpace(reason)
+	if cause == "" {
+		cause = "connection error"
+	}
+
+	next := m.connectAttempt + 1
+	total := len(m.connectQueue)
+	if next >= total {
+		current := m.connectQueue[m.connectAttempt]
+		m.pushLog(fmt.Sprintf("%s failed at %s: %s", strings.ToLower(label), current.Address(), cause))
+		m.connectQueue = nil
+		m.connectAttempt = 0
+		m.connectActionLabel = ""
+		m.connecting = false
+		return m, nil, false
+	}
+
+	m.connectAttempt = next
+	endpoint := m.connectQueue[next]
+	m.connecting = true
+	m.status = fmt.Sprintf("%s: retry %d/%d -> %s", label, next+1, total, endpoint.Address())
+	m.pushLog(fmt.Sprintf("%s retry %d/%d (%s) -> %s", strings.ToLower(label), next+1, total, cause, endpoint.Address()))
+	return m, reconnectCmd(m.reader, endpoint), true
+}
+
+func buildConnectPlan(candidates []discovery.Candidate, preferredIndex int, scanPorts []int) []reader.Endpoint {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	portFallback := []int{2022, 5000, 27011, 6000, 4001, 10001}
+	indexOrder := candidateConnectOrder(len(candidates), preferredIndex)
+	plan := make([]reader.Endpoint, 0, len(indexOrder)*4)
+	seen := make(map[string]struct{}, len(indexOrder)*8)
+
+	addEndpoint := func(host string, port int) {
+		if strings.TrimSpace(host) == "" || port <= 0 {
+			return
+		}
+		ep := reader.Endpoint{Host: host, Port: port}
+		key := ep.Address()
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		plan = append(plan, ep)
+	}
+
+	for _, idx := range indexOrder {
+		candidate := candidates[idx]
+		host := candidate.Host
+		ports := mergePortOrder(append([]int{candidate.Port}, scanPorts...), portFallback)
+		for _, port := range ports {
+			addEndpoint(host, port)
+		}
+	}
+
+	return plan
+}
+
+func candidateConnectOrder(total int, preferred int) []int {
+	if total <= 0 {
+		return nil
+	}
+	order := make([]int, 0, total)
+	seen := make(map[int]struct{}, total)
+
+	appendIndex := func(i int) {
+		if i < 0 || i >= total {
+			return
+		}
+		if _, ok := seen[i]; ok {
+			return
+		}
+		seen[i] = struct{}{}
+		order = append(order, i)
+	}
+
+	appendIndex(preferred)
+	for i := 0; i < total; i++ {
+		appendIndex(i)
+	}
+	return order
+}
+
+func mergePortOrder(primary []int, fallback []int) []int {
+	out := make([]int, 0, len(primary)+len(fallback))
+	seen := make(map[int]struct{}, len(primary)+len(fallback))
+
+	appendPort := func(port int) {
+		if port <= 0 {
+			return
+		}
+		if _, ok := seen[port]; ok {
+			return
+		}
+		seen[port] = struct{}{}
+		out = append(out, port)
+	}
+
+	for _, port := range primary {
+		appendPort(port)
+	}
+	for _, port := range fallback {
+		appendPort(port)
+	}
+
+	return out
 }
 
 func (m *Model) onNoTagObserved() {
@@ -1122,6 +1312,16 @@ func preferredVerifiedCandidateIndex(candidates []discovery.Candidate) int {
 		}
 	}
 	return -1
+}
+
+func preferredCandidateIndex(candidates []discovery.Candidate) int {
+	if len(candidates) == 0 {
+		return -1
+	}
+	if idx := preferredVerifiedCandidateIndex(candidates); idx >= 0 {
+		return idx
+	}
+	return 0
 }
 
 func countVerifiedCandidates(candidates []discovery.Candidate) int {

@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Runtime artifacts
+logs/
+.cache/
+
+# Build outputs
+bin/
+dist/
+rfid-go-bot
+
+# Archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.xz
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

@@ -43,6 +43,7 @@ func NewModel() Model {
 		inputMode:         inputModeNone,
 		status:            "Startup scan running...",
 		logs:              []string{"[startup] scan requested"},
+		botSocket:         envOr("BOT_SYNC_SOCKET", envOr("BOT_IPC_SOCKET", "/tmp/rfid-go-bot.sock")),
 		rxBytes:           0,
 		txBytes:           0,
 		lastRX:            "",
@@ -76,7 +77,10 @@ func NewModel() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return runScanCmd(m.scanOptions)
+	return tea.Batch(
+		runScanCmd(m.scanOptions),
+		botStatusTickCmd(300*time.Millisecond),
+	)
 }
 
 func (m Model) effectiveInventoryInterval() time.Duration {

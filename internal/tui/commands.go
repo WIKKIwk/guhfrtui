@@ -89,6 +89,16 @@ func probeTimeoutCmd(delay time.Duration) tea.Cmd {
 	return tea.Tick(delay, func(time.Time) tea.Msg { return probeTimeoutMsg{} })
 }
 
+func botStatusTickCmd(delay time.Duration) tea.Cmd {
+	if delay <= 0 {
+		delay = time.Second
+	}
+	return tea.Tick(delay, func(at time.Time) tea.Msg {
+		stats, err := getBotSyncClient().status()
+		return botStatusMsg{Stats: stats, Err: err, At: at}
+	})
+}
+
 func waitPacketCmd(ch <-chan reader.Packet) tea.Cmd {
 	return func() tea.Msg {
 		if ch == nil {

@@ -102,6 +102,29 @@ type readerErrMsg struct {
 
 type readerErrChannelClosedMsg struct{}
 
+type botStatusMsg struct {
+	Stats botRuntimeStats
+	Err   error
+	At    time.Time
+}
+
+type botRuntimeStats struct {
+	CacheSize      int       `json:"cache_size"`
+	DraftCount     int       `json:"draft_count"`
+	LastRefreshAt  time.Time `json:"last_refresh_at"`
+	LastRefreshOK  bool      `json:"last_refresh_ok"`
+	ScanActive     bool      `json:"scan_active"`
+	ScanSince      time.Time `json:"scan_since"`
+	SeenTotal      uint64    `json:"seen_total"`
+	CacheHits      uint64    `json:"cache_hits"`
+	CacheMisses    uint64    `json:"cache_misses"`
+	SubmittedOK    uint64    `json:"submitted_ok"`
+	SubmitNotFound uint64    `json:"submit_not_found"`
+	SubmitErrors   uint64    `json:"submit_errors"`
+	QueueDropped   uint64    `json:"queue_dropped"`
+	ScanInactive   uint64    `json:"scan_inactive"`
+}
+
 // Model is the app state.
 type Model struct {
 	reader *reader.Client
@@ -127,6 +150,17 @@ type Model struct {
 
 	status string
 	logs   []string
+
+	botOnline   bool
+	botStats    botRuntimeStats
+	botLastSync time.Time
+	botLastErr  string
+	botSocket   string
+
+	connectQueue       []reader.Endpoint
+	connectAttempt     int
+	connectActionLabel string
+	connecting         bool
 
 	rxBytes int
 	txBytes int

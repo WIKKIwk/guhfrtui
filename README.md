@@ -45,11 +45,58 @@ This project is a modular Go terminal app for ST-8508 style LAN RFID readers.
 go run ./cmd/st8508-tui
 ```
 
+`st8508-tui` now auto-starts `rfid-go-bot` in background (IPC socket mode), writes bot logs to `logs/rfid-go-bot.log`, and keeps terminal focused on TUI.
+
+## Docker (recommended for deploy)
+
+Inside `new_era_go/`:
+
+```bash
+make run
+```
+
+This command:
+
+- builds/starts container with `docker compose`
+- opens TUI inside container
+- keeps bot + TUI as one runtime on same machine
+
+Useful commands:
+
+```bash
+make logs
+make shell
+make down
+```
+
+## Child app -> bot sync
+
+To sync TUI read/start/stop directly with Go bot:
+
+```bash
+export BOT_SYNC_MODE=ipc
+export BOT_SYNC_SOCKET=/tmp/rfid-go-bot.sock
+export BOT_SYNC_ENABLED=1
+go run ./cmd/st8508-tui
+```
+
+Optional tuning:
+
+- `BOT_SYNC_MODE` (`ipc`, default `ipc`)
+- `BOT_SYNC_SOCKET` (default `/tmp/rfid-go-bot.sock`)
+- `BOT_SYNC_TIMEOUT_MS` (default `1200`)
+- `BOT_SYNC_QUEUE_SIZE` (default `4096`)
+- `BOT_SYNC_SOURCE` (default `st8508-tui`)
+- `BOT_AUTOSTART` (`1` default, set `0` to disable bot sidecar autostart)
+- `BOT_LOG_DIR` (default `logs`)
+
 Optional diagnostics:
 
 ```bash
 go run ./cmd/scancheck
 ```
+
+`cmd/st8508-tui` now loads `.env` automatically (or `BOT_ENV_FILE` path) before startup.
 
 ## Go SDK
 

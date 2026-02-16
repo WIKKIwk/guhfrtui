@@ -197,6 +197,29 @@ func (m Model) controlPageLines() []string {
 	} else {
 		lines = append(lines, "Connection: disconnected")
 	}
+	if len(m.connectQueue) > 0 {
+		lines = append(lines, fmt.Sprintf("Connect plan: %s %d/%d", m.connectActionLabel, m.connectAttempt+1, len(m.connectQueue)))
+	}
+
+	botState := "OFFLINE"
+	if m.botOnline {
+		botState = "ONLINE"
+	}
+	botScan := "OFF"
+	if m.botStats.ScanActive {
+		botScan = "ON"
+	}
+	lines = append(lines, fmt.Sprintf("Bot: %s | scan:%s | socket:%s", botState, botScan, m.botSocket))
+	if m.botOnline {
+		lines = append(lines, fmt.Sprintf("Bot Cache: %d EPC | draft:%d | refresh:%s", m.botStats.CacheSize, m.botStats.DraftCount, formatShortTime(m.botStats.LastRefreshAt)))
+		lines = append(lines, fmt.Sprintf("Bot Submit: ok:%d not_found:%d err:%d", m.botStats.SubmittedOK, m.botStats.SubmitNotFound, m.botStats.SubmitErrors))
+		lines = append(lines, fmt.Sprintf("Bot Seen: total:%d hit:%d miss:%d inactive:%d", m.botStats.SeenTotal, m.botStats.CacheHits, m.botStats.CacheMisses, m.botStats.ScanInactive))
+	} else {
+		lines = append(lines, "Bot status: unavailable")
+		if strings.TrimSpace(m.botLastErr) != "" {
+			lines = append(lines, "Bot error: "+trimText(m.botLastErr, 72))
+		}
+	}
 
 	invState := "stopped"
 	if m.inventoryRunning {
@@ -585,6 +608,13 @@ func onOff(value bool) string {
 		return "ON"
 	}
 	return "OFF"
+}
+
+func formatShortTime(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.Format("15:04:05")
 }
 
 func maskBits(mask byte) string {
