@@ -51,10 +51,59 @@ Optional diagnostics:
 go run ./cmd/scancheck
 ```
 
+## Go SDK
+
+`sdk/` package provides a high-level API for discovery, connect, and realtime tag stream.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"new_era_go/sdk"
+)
+
+func main() {
+	ctx := context.Background()
+	client := sdk.NewClient()
+	defer client.Close()
+
+	_, err := client.QuickConnect(ctx, sdk.DefaultScanOptions())
+	if err != nil {
+		panic(err)
+	}
+
+	cfg := client.InventoryConfig()
+	cfg.ScanTime = 1
+	cfg.PollInterval = 40 * time.Millisecond
+	client.SetInventoryConfig(cfg)
+
+	if err := client.StartInventory(ctx); err != nil {
+		panic(err)
+	}
+	defer client.StopInventory()
+
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case tag := <-client.Tags():
+			fmt.Printf("epc=%s ant=%d new=%v total=%d\n", tag.EPC, tag.Antenna, tag.IsNew, tag.UniqueTags)
+		case err := <-client.Errors():
+			fmt.Println("sdk error:", err)
+		case <-timeout:
+			return
+		}
+	}
+}
+```
+
 ## Key bindings
 
 - Global: `q` quit, `b` back, `m` home, `j/k` or `up/down` move
-- Home page: `1..6` direct open item, `enter` open selected
+- Home page: `1..7` direct open item, `enter` open selected
 - Device List: verified readers are marked, `enter` connect selected, `s` rescan LAN, `a` quick connect
 - Reader Control: `1` start reading, `2` stop reading, `3` probe info, `4` raw hex
 - Raw hex mode: `enter` send, `esc` cancel
