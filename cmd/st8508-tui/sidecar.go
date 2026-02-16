@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -33,7 +34,11 @@ func startBotSidecar() (func(), error) {
 		return nil, err
 	}
 
-	cmd := buildBotCommand()
+	cmd, err := buildBotCommand()
+	if err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = os.Environ()
@@ -44,7 +49,12 @@ func startBotSidecar() (func(), error) {
 		return nil, err
 	}
 
-	waitErr := waitForBot(socketPath, cmd, 20*time.Second)
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	waitErr := waitForBot(socketPath, waitCh, 20*time.Second)
 	if waitErr != nil {
 		_ = terminateProcessGroup(cmd)
 		_ = logFile.Close()
@@ -58,31 +68,47 @@ func startBotSidecar() (func(), error) {
 	return cleanup, nil
 }
 
-func buildBotCommand() *exec.Cmd {
+func buildBotCommand() (*exec.Cmd, error) {
 	if raw := strings.TrimSpace(os.Getenv("BOT_AUTOSTART_CMD")); raw != "" {
-		return exec.Command("sh", "-lc", raw)
+		return exec.Command("sh", "-lc", raw), nil
 	}
 
 	if info, err := os.Stat("./rfid-go-bot"); err == nil && info.Mode().Perm()&0o111 != 0 {
-		return exec.Command("./rfid-go-bot")
+		return exec.Command("./rfid-go-bot"), nil
 	}
-	return exec.Command("go", "run", "./cmd/rfid-go-bot")
+
+	if _, err := os.Stat("./cmd/rfid-go-bot"); err == nil {
+		if _, lookErr := exec.LookPath("go"); lookErr != nil {
+			return nil, fmt.Errorf("BOT_AUTOSTART=1 but go binary not found in PATH")
+		}
+		return exec.Command("go", "run", "./cmd/rfid-go-bot"), nil
+	}
+
+	return nil, errors.New(
+		"BOT_AUTOSTART=1 but bot entrypoint not found. Expected ./cmd/rfid-go-bot or ./rfid-go-bot binary; set BOT_AUTOSTART_CMD or BOT_AUTOSTART=0",
+	)
 }
 
-func waitForBot(socketPath string, cmd *exec.Cmd, timeout time.Duration) error {
+func waitForBot(socketPath string, waitCh <-chan error, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timeout waiting for bot socket")
 		}
 
+		select {
+		case err := <-waitCh:
+			if err == nil {
+				return fmt.Errorf("bot process exited before socket became ready")
+			}
+			return fmt.Errorf("bot process exited early: %w", err)
+		default:
+		}
+
 		if err := pingBotSocket(socketPath, 800*time.Millisecond); err == nil {
 			return nil
 		}
 
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			return fmt.Errorf("bot process exited early")
-		}
 		time.Sleep(220 * time.Millisecond)
 	}
 }
