@@ -6,6 +6,7 @@
 # Runtime artifacts
 logs/
 .cache/
+/Java-linux/
 
 # Build outputs
 bin/
