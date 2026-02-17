@@ -646,8 +646,11 @@ protocol:
   /scan ............. start inventory reading
   /stop ............. stop inventory reading
   /status ........... show runtime statistics
+  /range20 on|off|status ... long-range profile (best-effort)
   /turbo ............ toggle turbo scan mode
 ```
+
+`/range20 on` applies a built-in strict profile: max power, longer scan time, US region/frequency window and per-antenna max power map.
 
 ---
 

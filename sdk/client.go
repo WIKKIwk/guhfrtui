@@ -78,13 +78,13 @@ func (c *Client) Endpoint() (Endpoint, bool) {
 func (c *Client) InventoryConfig() InventoryConfig {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cfg
+	return cloneInventoryConfig(c.cfg)
 }
 
 func (c *Client) SetInventoryConfig(cfg InventoryConfig) {
 	cfg = normalizeConfig(cfg)
 	c.mu.Lock()
-	c.cfg = cfg
+	c.cfg = cloneInventoryConfig(cfg)
 	if c.readerAddr == 0 {
 		c.readerAddr = cfg.ReaderAddress
 	}
@@ -199,12 +199,21 @@ func (c *Client) ApplyInventoryConfig(ctx context.Context) error {
 	}
 
 	cfg, addr := c.snapshotConfig()
-	commands := [][]byte{
-		reader18.SetWorkModeCommand(addr, []byte{0x00}),
+	commands := make([][]byte, 0, 7)
+	commands = append(commands, reader18.SetWorkModeCommand(addr, []byte{0x00}))
+	if cfg.RegionSet {
+		commands = append(commands, reader18.SetFrequencyRangeCommand(addr, cfg.RegionHigh, cfg.RegionLow))
+	}
+	commands = append(commands,
 		reader18.SetScanTimeCommand(addr, cfg.ScanTime),
 		reader18.SetAntennaMuxCommand(addr, cfg.AntennaMask),
-		reader18.SetOutputPowerCommand(addr, cfg.OutputPower),
+	)
+	if len(cfg.PerAntennaPower) > 0 {
+		commands = append(commands, reader18.SetOutputPowerByAntCommand(addr, cfg.PerAntennaPower))
 	}
+	// Always send global power as fallback after optional per-antenna settings.
+	commands = append(commands, reader18.SetOutputPowerCommand(addr, cfg.OutputPower))
+
 	for _, command := range commands {
 		select {
 		case <-ctx.Done():
@@ -531,7 +540,7 @@ func (c *Client) nextInventoryCommand() (inventory []byte, single []byte, interv
 func (c *Client) snapshotConfig() (InventoryConfig, byte) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.cfg, c.readerAddr
+	return cloneInventoryConfig(c.cfg), c.readerAddr
 }
 
 func (c *Client) currentReaderAddress() byte {

@@ -25,6 +25,15 @@ type Status struct {
 	LastTagEPC   string
 	LastStartAt  time.Time
 	RestartCount uint64
+	ScanProfile  string
+	OutputPower  byte
+	ScanTime     byte
+	PollCycle    time.Duration
+	AntennaMask  byte
+	RegionCode   string
+	RegionHigh   byte
+	RegionLow    byte
+	PerAntenna   int
 }
 
 type Manager struct {
@@ -32,18 +41,30 @@ type Manager struct {
 	onEPC    EPCHandler
 	notifyFn Notifier
 
-	mu      sync.Mutex
-	running bool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	status  Status
+	mu        sync.Mutex
+	running   bool
+	cancel    context.CancelFunc
+	done      chan struct{}
+	status    Status
+	invCfg    sdk.InventoryConfig
+	longRange bool
 }
 
 func New(cfg config.Config, onEPC EPCHandler, notify Notifier) *Manager {
+	invCfg := sdk.DefaultInventoryConfig()
 	return &Manager{
 		cfg:      cfg,
 		onEPC:    onEPC,
 		notifyFn: notify,
+		invCfg:   invCfg,
+		status: Status{
+			ScanProfile: "balanced",
+			OutputPower: invCfg.OutputPower,
+			ScanTime:    invCfg.ScanTime,
+			PollCycle:   invCfg.EffectiveInterval(),
+			AntennaMask: invCfg.AntennaMask,
+			RegionCode:  "-",
+		},
 	}
 }
 
@@ -97,16 +118,75 @@ func (m *Manager) Status() Status {
 func (m *Manager) StatusText() string {
 	st := m.Status()
 	return fmt.Sprintf(
-		"running=%v connected=%v endpoint=%s\nseen=%d last_tag=%s at=%s\nrestarts=%d last_error=%s",
+		"running=%v connected=%v endpoint=%s\nprofile=%s power=0x%02X scan=%d cycle=%s ant_mask=0x%02X region=%s [0x%02X/0x%02X] per_ant=%d\nseen=%d last_tag=%s at=%s\nrestarts=%d last_error=%s",
 		st.Running,
 		st.Connected,
 		fallback(st.Endpoint, "-"),
+		fallback(st.ScanProfile, "-"),
+		st.OutputPower,
+		st.ScanTime,
+		st.PollCycle,
+		st.AntennaMask,
+		fallback(st.RegionCode, "-"),
+		st.RegionHigh,
+		st.RegionLow,
+		st.PerAntenna,
 		st.UniqueSeen,
 		fallback(trimEPC(st.LastTagEPC), "-"),
 		formatTime(st.LastTagAt),
 		st.RestartCount,
 		fallback(st.LastError, "-"),
 	)
+}
+
+func (m *Manager) SetLongRangeMode(enabled bool) string {
+	nextCfg := sdk.DefaultInventoryConfig()
+	profile := "balanced"
+	regionCode := "-"
+	if enabled {
+		nextCfg, regionCode = longRangeInventoryConfig()
+		profile = "long_range"
+	}
+
+	m.mu.Lock()
+	m.longRange = enabled
+	m.invCfg = nextCfg
+	m.status.ScanProfile = profile
+	m.status.OutputPower = nextCfg.OutputPower
+	m.status.ScanTime = nextCfg.ScanTime
+	m.status.PollCycle = nextCfg.EffectiveInterval()
+	m.status.AntennaMask = nextCfg.AntennaMask
+	m.status.RegionCode = regionCode
+	if nextCfg.RegionSet {
+		m.status.RegionHigh = nextCfg.RegionHigh
+		m.status.RegionLow = nextCfg.RegionLow
+	} else {
+		m.status.RegionHigh = 0
+		m.status.RegionLow = 0
+	}
+	m.status.PerAntenna = len(nextCfg.PerAntennaPower)
+	m.mu.Unlock()
+
+	if enabled {
+		return fmt.Sprintf(
+			"long-range yoqildi: power=0x%02X scan=%d cycle=%s mask=0x%02X region=%s [0x%02X/0x%02X] per_ant=%d",
+			nextCfg.OutputPower,
+			nextCfg.ScanTime,
+			nextCfg.EffectiveInterval(),
+			nextCfg.AntennaMask,
+			regionCode,
+			nextCfg.RegionHigh,
+			nextCfg.RegionLow,
+			len(nextCfg.PerAntennaPower),
+		)
+	}
+	return "long-range o'chirildi: balanced profilga qaytdi"
+}
+
+func (m *Manager) LongRangeMode() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.longRange
 }
 
 func (m *Manager) scanLoop(ctx context.Context, done chan struct{}) {
@@ -209,7 +289,7 @@ func (m *Manager) connectAndStart(ctx context.Context, client *sdk.Client) (bool
 		endpoint = target.Address()
 	}
 
-	cfg := client.InventoryConfig()
+	cfg := m.inventoryConfig()
 	client.SetInventoryConfig(cfg)
 
 	if err := client.StartInventory(ctx); err != nil {
@@ -220,8 +300,26 @@ func (m *Manager) connectAndStart(ctx context.Context, client *sdk.Client) (bool
 	m.status.Connected = true
 	m.status.Endpoint = endpoint
 	m.status.LastError = ""
+	m.status.OutputPower = cfg.OutputPower
+	m.status.ScanTime = cfg.ScanTime
+	m.status.PollCycle = cfg.EffectiveInterval()
+	m.status.AntennaMask = cfg.AntennaMask
+	if cfg.RegionSet {
+		m.status.RegionHigh = cfg.RegionHigh
+		m.status.RegionLow = cfg.RegionLow
+	} else {
+		m.status.RegionHigh = 0
+		m.status.RegionLow = 0
+	}
+	m.status.PerAntenna = len(cfg.PerAntennaPower)
 	m.mu.Unlock()
 	return true, nil
+}
+
+func (m *Manager) inventoryConfig() sdk.InventoryConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.invCfg
 }
 
 func (m *Manager) consumeTags(ctx context.Context, client *sdk.Client) bool {
@@ -327,4 +425,35 @@ func formatTime(t time.Time) string {
 		return "never"
 	}
 	return t.Format(time.RFC3339)
+}
+
+func longRangeInventoryConfig() (sdk.InventoryConfig, string) {
+	cfg := sdk.DefaultInventoryConfig()
+	// Vendor Java manual exposes SetRfPower range as 0..30.
+	cfg.OutputPower = 30
+	cfg.ScanTime = 10
+	cfg.QValue = 4
+	cfg.Session = 0
+	cfg.NoTagABSwitch = 0
+	cfg.SingleFallbackEach = 4
+	cfg.PollInterval = 200 * time.Millisecond
+	cfg.AntennaMask = 0x0F
+
+	regionCode, high, low := defaultRange20Region()
+	cfg.RegionSet = true
+	cfg.RegionHigh = high
+	cfg.RegionLow = low
+	cfg.PerAntennaPower = []byte{30, 30, 30, 30, 0, 0, 0, 0}
+	return cfg, regionCode
+}
+
+func defaultRange20Region() (string, byte, byte) {
+	high, low := encodeRegion(2, 49, 0)
+	return "US", high, low
+}
+
+func encodeRegion(band, maxFre, minFre int) (byte, byte) {
+	high := byte(((band & 0x0C) << 4) | (maxFre & 0x3F))
+	low := byte(((band & 0x03) << 6) | (minFre & 0x3F))
+	return high, low
 }

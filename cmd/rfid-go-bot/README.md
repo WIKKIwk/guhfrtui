@@ -67,4 +67,7 @@ printf '{"type":"draft_epcs","epcs":["E2000017221101441890ABCD"],"source":"erp"}
 - `/scan`
 - `/stop`
 - `/status`
+- `/range20 on|off|status` (best-effort long-range profile)
 - `/turbo`
+
+`/range20 on` applies built-in strict profile: region + frequency window + per-antenna max power.

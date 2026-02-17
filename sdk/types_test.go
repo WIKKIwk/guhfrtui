@@ -69,3 +69,17 @@ func TestNextInventoryAntennaCyclesMask(t *testing.T) {
 		t.Fatalf("unexpected second antenna byte: 0x%02X", a2)
 	}
 }
+
+func TestNormalizeConfigClampsPerAntennaPowerAndCopies(t *testing.T) {
+	in := []byte{0x10, 0x40}
+	cfg := normalizeConfig(InventoryConfig{
+		PerAntennaPower: in,
+	})
+	in[0] = 0x00
+	if cfg.PerAntennaPower[0] != 0x10 {
+		t.Fatalf("expected copied per-antenna value, got 0x%02X", cfg.PerAntennaPower[0])
+	}
+	if cfg.PerAntennaPower[1] != 0x1E {
+		t.Fatalf("expected clamped per-antenna value, got 0x%02X", cfg.PerAntennaPower[1])
+	}
+}

@@ -159,6 +159,15 @@ func SetOutputPowerCommand(address, value byte) []byte {
 	return BuildCommand(address, CmdSetOutputPower, []byte{value})
 }
 
+// SetOutputPowerByAntCommand sets output power per antenna (one byte per port).
+func SetOutputPowerByAntCommand(address byte, powers []byte) []byte {
+	payload := make([]byte, 0, len(powers))
+	for _, p := range powers {
+		payload = append(payload, p)
+	}
+	return BuildCommand(address, CmdSetOutputPower, payload)
+}
+
 // SetFrequencyRangeCommand sets high/low channel bytes for command 0x22.
 func SetFrequencyRangeCommand(address, high, low byte) []byte {
 	return BuildCommand(address, CmdSetRegion, []byte{high, low})

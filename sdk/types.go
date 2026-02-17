@@ -49,6 +49,10 @@ type InventoryConfig struct {
 	ScanTime           byte
 	PollInterval       time.Duration
 	OutputPower        byte
+	RegionSet          bool
+	RegionHigh         byte
+	RegionLow          byte
+	PerAntennaPower    []byte
 	NoTagABSwitch      int
 	SingleFallbackEach int
 }
@@ -83,6 +87,7 @@ func (c InventoryConfig) EffectiveInterval() time.Duration {
 }
 
 func normalizeConfig(cfg InventoryConfig) InventoryConfig {
+	cfg = cloneInventoryConfig(cfg)
 	if cfg.AntennaMask == 0 {
 		cfg.AntennaMask = 0x01
 	}
@@ -101,7 +106,20 @@ func normalizeConfig(cfg InventoryConfig) InventoryConfig {
 	if cfg.NoTagABSwitch < 0 {
 		cfg.NoTagABSwitch = 0
 	}
+	for i := range cfg.PerAntennaPower {
+		if cfg.PerAntennaPower[i] > 0x1E {
+			cfg.PerAntennaPower[i] = 0x1E
+		}
+	}
 	return cfg
+}
+
+func cloneInventoryConfig(cfg InventoryConfig) InventoryConfig {
+	out := cfg
+	if len(cfg.PerAntennaPower) > 0 {
+		out.PerAntennaPower = append([]byte(nil), cfg.PerAntennaPower...)
+	}
+	return out
 }
 
 // TagEvent is one decoded EPC read event.
