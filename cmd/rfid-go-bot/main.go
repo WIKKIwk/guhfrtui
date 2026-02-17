@@ -51,20 +51,15 @@ func main() {
 	backend := strings.ToLower(cfg.ScanBackend)
 	useSDKScanner := backend == "sdk" || backend == "hybrid"
 
-	var scanner *reader.Manager
-	var tgScanner telegram.Scanner
-	if useSDKScanner {
-		scanner = reader.New(cfg, func(epc string) {
-			svc.HandleEPC(context.Background(), epc, "sdk")
-		}, nil)
-		tgScanner = scanner
-	}
+	// Keep scanner manager available for Telegram/HTTP commands regardless of ingest backend.
+	// In ingest mode we still avoid wiring scanner into IPC start/stop flow to prevent duplicate readers.
+	scanner := reader.New(cfg, func(epc string) {
+		svc.HandleEPC(context.Background(), epc, "sdk")
+	}, nil)
 
-	tg := telegram.New(cfg.BotToken, cfg.RequestTimeout, cfg.PollTimeout, svc, tgScanner)
+	tg := telegram.New(cfg.BotToken, cfg.RequestTimeout, cfg.PollTimeout, svc, scanner)
 	svc.SetNotifier(tg)
-	if scanner != nil {
-		scanner.SetNotifier(tg.Notify)
-	}
+	scanner.SetNotifier(tg.Notify)
 
 	if err := svc.Bootstrap(ctx); err != nil {
 		log.Printf("[bot] startup cache refresh failed: %v", err)
@@ -82,7 +77,7 @@ func main() {
 	svc.Run(ctx)
 	go tg.Run(ctx)
 
-	if cfg.AutoScan && scanner != nil {
+	if cfg.AutoScan && useSDKScanner {
 		if err := scanner.Start(ctx); err != nil {
 			log.Printf("[bot] auto scan start failed: %v", err)
 		} else {
@@ -92,7 +87,7 @@ func main() {
 	}
 
 	var ipcScanner ipc.Scanner
-	if scanner != nil {
+	if useSDKScanner {
 		ipcScanner = scanner
 	}
 	if cfg.IPCEnabled && cfg.IPCSocket != "" {
