@@ -1,28 +1,61 @@
-.PHONY: run up down logs shell
+SHELL := /usr/bin/env bash
 
-up:
-	@docker compose up -d --build rfid-go
+GO ?= go
+ENV_FILE ?= .env
+BINDIR ?= bin
+PREFIX ?= /usr/local
 
-run: up
-	@docker compose exec -it \
-		-e BOT_ENV_FILE=/workspace/new_era_go/.env \
-		-e BOT_SHOW_TUI=0 \
-		rfid-go bash -c '\
-			set -euo pipefail; \
-			cd /workspace/new_era_go; \
-			mkdir -p /workspace/.cache/new-era-go/gocache /workspace/.cache/new-era-go/gomod; \
-			export GOCACHE=/workspace/.cache/new-era-go/gocache; \
-			export GOMODCACHE=/workspace/.cache/new-era-go/gomod; \
-			if [[ -x /usr/local/go/bin/go ]]; then GO_BIN=/usr/local/go/bin/go; else GO_BIN=$$(command -v go || true); fi; \
-			if [[ -z "$$GO_BIN" ]]; then echo "go binary topilmadi" >&2; exit 1; fi; \
-			exec "$$GO_BIN" run ./cmd/st8508-tui \
-		'
+.PHONY: run run-tui bot run-bot scan build build-all install fmt fmt-check test check clean
 
-down:
-	@docker compose down
+run: run-tui
 
-logs:
-	@docker compose logs -f rfid-go
+run-tui:
+	@BOT_ENV_FILE="$(ENV_FILE)" $(GO) run ./cmd/st8508-tui
 
-shell: up
-	@docker compose exec -it rfid-go bash
+bot: run-bot
+
+run-bot:
+	@BOT_ENV_FILE="$(ENV_FILE)" BOT_SHOW_TUI=0 $(GO) run ./cmd/rfid-go-bot
+
+scan:
+	@BOT_ENV_FILE="$(ENV_FILE)" $(GO) run ./cmd/scancheck
+
+build: build-all
+
+build-all:
+	@mkdir -p "$(BINDIR)"
+	@$(GO) build -o "$(BINDIR)/st8508-tui" ./cmd/st8508-tui
+	@$(GO) build -o "$(BINDIR)/rfid-go-bot" ./cmd/rfid-go-bot
+	@$(GO) build -o "$(BINDIR)/scancheck" ./cmd/scancheck
+
+install: build-all
+	@install -d "$(PREFIX)/bin"
+	@install -m 0755 "$(BINDIR)/st8508-tui" "$(PREFIX)/bin/st8508-tui"
+	@install -m 0755 "$(BINDIR)/rfid-go-bot" "$(PREFIX)/bin/rfid-go-bot"
+	@install -m 0755 "$(BINDIR)/scancheck" "$(PREFIX)/bin/scancheck"
+
+fmt:
+	@files="$$(rg --files -g '*.go')"; \
+	if [[ -n "$$files" ]]; then \
+		gofmt -w $$files; \
+	fi
+
+fmt-check:
+	@files="$$(rg --files -g '*.go')"; \
+	if [[ -z "$$files" ]]; then \
+		exit 0; \
+	fi; \
+	unformatted="$$(gofmt -l $$files)"; \
+	if [[ -n "$$unformatted" ]]; then \
+		echo "Unformatted files:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+test:
+	@$(GO) test ./...
+
+check: fmt-check test
+
+clean:
+	@rm -rf "$(BINDIR)"

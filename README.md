@@ -51,7 +51,7 @@
   06 .... Go SDK
   07 .... Protocol Details
   08 .... Key Bindings
-  09 .... Docker Deployment
+  09 .... Linux Native Deployment
   10 .... Diagnostics
   11 .... License
 ```
@@ -83,7 +83,7 @@ real-time tag reading, ERP submission (ERPNext), and operator notification
   [x] IPC bridge between TUI and background service
   [x] HTTP webhook endpoint for external integrations
   [x] High-level Go SDK for programmatic reader control
-  [x] Docker-native deployment with host networking
+  [x] Linux-native deployment (Ubuntu/Arch)
   [x] Raw hex console for protocol debugging
   [x] Multi-region RF support (US/EU/JP/KR/CN + 10 more)
 ```
@@ -181,8 +181,9 @@ new_era_gos/
 |   |-- tui/                   Bubble Tea terminal interface
 |   |   |-- types.go           state model, message types, screens
 |   |   |-- model.go           model initialization
-|   |   |-- view.go            page rendering (7 screens)
-|   |   |-- update.go          event handling, state transitions
+|   |   |-- view_*.go          page rendering split by layout/chrome/pages
+|   |   |-- update_*.go        state transitions split by feature
+|   |   |-- update/helpers.go  shared pure helpers
 |   |   |-- commands.go        async commands, scan/connect helpers
 |   |   |-- bot_sync.go        IPC client to rfid-go-bot
 |   |   |-- style.go           terminal styling definitions
@@ -215,12 +216,14 @@ new_era_gos/
 |           +-- server.go      REST endpoints, secret validation
 |
 |-- sdk/                       high-level Go SDK
-|   |-- client.go              facade: discover, connect, inventory
+|   |-- client_*.go            facade split by scan/connect/inventory runtime
 |   +-- types.go               public types: Endpoint, TagEvent, Config
 |
-|-- Dockerfile.dev             development container (golang:1.25)
-|-- docker-compose.yml         service definition (host network)
-|-- Makefile                   build/run/deploy commands
+|-- docs/                      additional developer docs
+|   +-- LINUX_NATIVE.md        Ubuntu/Arch native setup
+|-- deploy/systemd/            Linux service templates
+|   +-- rfid-go-bot.service    sample systemd unit
+|-- Makefile                   Linux-native run/build commands
 |-- go.mod                     module: new_era_go (Go 1.25)
 +-- .env.bot.example           configuration template
 ```
@@ -248,8 +251,8 @@ cd new_era_gos
 cp .env.bot.example .env
 # edit .env with your credentials
 
-# run TUI (auto-starts bot sidecar in background)
-go run ./cmd/st8508-tui
+# run TUI natively on Linux (auto-starts bot sidecar in background)
+make run
 ```
 
 ### Run Modes
@@ -258,10 +261,10 @@ go run ./cmd/st8508-tui
 +-----------------------+---------------------------------------------+
 | Mode                  | Command                                     |
 +-----------------------+---------------------------------------------+
-| TUI + Bot (default)   | go run ./cmd/st8508-tui                     |
+| TUI + Bot (default)   | make run                                    |
 | TUI only (no bot)     | BOT_AUTOSTART=0 go run ./cmd/st8508-tui     |
-| Bot only (headless)   | BOT_SHOW_TUI=0 go run ./cmd/rfid-go-bot     |
-| Diagnostic scan       | go run ./cmd/scancheck                       |
+| Bot only (headless)   | make bot                                    |
+| Diagnostic scan       | make scan                                   |
 +-----------------------+---------------------------------------------+
 ```
 
@@ -551,48 +554,57 @@ protocol handshake, and scores candidates by verification status.
 
 ---
 
-## 09. Docker Deployment
+## 09. Linux Native Deployment
 
-### Build and Run
+Native Linux run/build is the default workflow.
+
+### Ubuntu / Arch Setup
 
 ```bash
-# build image and start container
-make up
+# Ubuntu
+sudo apt update
+sudo apt install -y golang-go build-essential ca-certificates git
 
-# run TUI inside container
+# Arch
+sudo pacman -S --needed go base-devel ca-certificates git
+```
+
+### Native Commands
+
+```bash
+# TUI + bot sidecar
 make run
 
-# interactive shell
-make shell
+# bot only
+make bot
 
-# follow logs
-make logs
+# scan diagnostics
+make scan
 
-# stop and remove container
-make down
+# build binaries to ./bin
+make build
+
+# run checks/tests
+make check
 ```
 
-### Container Details
+### Install Binaries (Optional)
 
-```
-  Base image ........ golang:1.25-bookworm
-  Network mode ...... host (required for LAN reader discovery)
-  Working dir ....... /workspace/new_era_go
-  Volume mounts ..... source code + build cache
-  Go caches ......... persisted to .cache/ directory
+```bash
+sudo make install PREFIX=/usr/local
 ```
 
-### docker-compose.yml
+### Systemd (Optional)
 
-The service runs with `network_mode: host` to allow direct LAN access for
-reader discovery. Source code is bind-mounted for live development.
+Service template is provided at:
 
 ```
-  Environment defaults:
-    BOT_ENV_FILE ........ /workspace/new_era_go/.env
-    BOT_SHOW_TUI ........ 0 (headless bot mode)
-    BOT_AUTOSTART ....... 1
+deploy/systemd/rfid-go-bot.service
 ```
+
+Adjust `User`, `WorkingDirectory`, and `BOT_ENV_FILE` before enabling.
+
+Detailed native instructions: `docs/LINUX_NATIVE.md`.
 
 ---
 
@@ -663,5 +675,5 @@ Proprietary. All rights reserved.
 ```
   new_era_go v1.0
   Go 1.25 | Reader18 Protocol | Bubble Tea TUI
-  ERPNext Integration | Telegram Bot | Docker Ready
+  ERPNext Integration | Telegram Bot | Linux Native
 ```

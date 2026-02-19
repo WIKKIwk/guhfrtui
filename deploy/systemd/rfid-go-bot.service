@@ -1,0 +1,17 @@
+[Unit]
+Description=New Era Go RFID Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rfid
+WorkingDirectory=/opt/new_era_gos
+Environment=BOT_ENV_FILE=/opt/new_era_gos/.env
+Environment=BOT_SHOW_TUI=0
+ExecStart=/opt/new_era_gos/bin/rfid-go-bot
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
