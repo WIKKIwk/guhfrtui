@@ -658,7 +658,9 @@ protocol:
   /scan ............. start inventory reading
   /stop ............. stop inventory reading
   /status ........... show runtime statistics
+  /cache ............ write draft/seen EPC snapshot files
   /range20 on|off|status ... long-range profile (best-effort)
+  /range20_on | /range20_off ... quick on/off aliases
   /turbo ............ toggle turbo scan mode
 ```
 

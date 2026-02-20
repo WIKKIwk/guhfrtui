@@ -126,7 +126,9 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 			"/read stop - /stop bilan bir xil\n" +
 			"/stop - reader scan ni to'xtatish\n" +
 			"/status - holat\n" +
+			"/cache - draft/epc snapshot fayllarini yozish\n" +
 			"/range20 on|off|status - long-range profil\n" +
+			"/range20_on | /range20_off - tez yoqish/o'chirish\n" +
 			"/turbo - cache ni darrov yangilash"
 		return b.sendMessage(ctx, msg.Chat.ID, text)
 
@@ -156,8 +158,20 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 		}
 		return b.sendMessage(ctx, msg.Chat.ID, text)
 
+	case "/cache":
+		return b.handleCacheDump(ctx, msg.Chat.ID)
+
 	case "/range20":
 		return b.handleRange20(ctx, msg.Chat.ID, args)
+
+	case "/range20_on", "range20_on":
+		return b.handleRange20(ctx, msg.Chat.ID, []string{"on"})
+
+	case "/range20_off", "range20_off":
+		return b.handleRange20(ctx, msg.Chat.ID, []string{"off"})
+
+	case "/range20_status", "range20_status":
+		return b.handleRange20(ctx, msg.Chat.ID, []string{"status"})
 
 	case "/turbo":
 		b.addChat(msg.Chat.ID)

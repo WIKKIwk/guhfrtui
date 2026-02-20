@@ -31,3 +31,13 @@ func TestParseCommandWithBotMention(t *testing.T) {
 		t.Fatalf("args mismatch: got %v want [start]", args)
 	}
 }
+
+func TestParseCommandRange20Alias(t *testing.T) {
+	cmd, args := parseCommand("/range20_on")
+	if cmd != "/range20_on" {
+		t.Fatalf("cmd mismatch: got %q want %q", cmd, "/range20_on")
+	}
+	if len(args) != 0 {
+		t.Fatalf("args mismatch: got %v want empty", args)
+	}
+}
