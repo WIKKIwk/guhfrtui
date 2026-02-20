@@ -227,6 +227,9 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 		return nil
 
 	case "/test_stop", "test_stop":
+		if msg.MessageID > 0 {
+			_ = b.deleteMessage(ctx, msg.Chat.ID, msg.MessageID)
+		}
 		return b.handleTestStop(ctx, msg.Chat.ID)
 	}
 
