@@ -213,8 +213,11 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 	case "/test":
 		b.addChat(msg.Chat.ID)
 		b.testMode.RequestFile(msg.Chat.ID)
+		if msg.MessageID > 0 {
+			_ = b.deleteMessage(ctx, msg.Chat.ID, msg.MessageID)
+		}
 		if msg.Document != nil {
-			return b.handleTestFileUpload(ctx, msg.Chat.ID, msg.MessageID, *msg.Document)
+			return b.handleTestFileUpload(ctx, msg.Chat.ID, 0, *msg.Document)
 		}
 		messageID, err := b.sendMessageWithID(ctx, msg.Chat.ID, "🧪 Test rejimi yoqildi. EPC ro'yxati bor .txt fayl yuboring.")
 		if err != nil {

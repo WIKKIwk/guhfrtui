@@ -51,7 +51,6 @@ func (b *Bot) handleTestFileUpload(ctx context.Context, chatID int64, sourceMess
 
 func (b *Bot) handleTestStop(ctx context.Context, chatID int64) error {
 	b.addChat(chatID)
-	b.takeTestPromptMessage(chatID)
 
 	result, err := b.testMode.Stop(chatID)
 	if err != nil {
@@ -77,7 +76,7 @@ func (b *Bot) handleTestStop(ctx context.Context, chatID int64) error {
 		result.Read,
 		result.Unread,
 	)
-	return b.sendMessage(ctx, chatID, text)
+	return b.sendOrEditTestPrompt(ctx, chatID, text)
 }
 
 func (b *Bot) OnReaderEPC(epc string) {
@@ -164,23 +163,26 @@ func (b *Bot) setTestPromptMessage(chatID int64, messageID int) {
 	b.testMu.Unlock()
 }
 
-func (b *Bot) takeTestPromptMessage(chatID int64) int {
+func (b *Bot) getTestPromptMessage(chatID int64) int {
 	if chatID == 0 {
 		return 0
 	}
 	b.testMu.Lock()
 	defer b.testMu.Unlock()
-	messageID := b.testPrompts[chatID]
-	delete(b.testPrompts, chatID)
-	return messageID
+	return b.testPrompts[chatID]
 }
 
 func (b *Bot) sendOrEditTestPrompt(ctx context.Context, chatID int64, text string) error {
-	promptID := b.takeTestPromptMessage(chatID)
+	promptID := b.getTestPromptMessage(chatID)
 	if promptID > 0 {
 		if err := b.editMessage(ctx, chatID, promptID, text); err == nil {
 			return nil
 		}
 	}
-	return b.sendMessage(ctx, chatID, text)
+	messageID, err := b.sendMessageWithID(ctx, chatID, text)
+	if err != nil {
+		return err
+	}
+	b.setTestPromptMessage(chatID, messageID)
+	return nil
 }
