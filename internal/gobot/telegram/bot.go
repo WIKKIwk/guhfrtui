@@ -35,6 +35,7 @@ type Bot struct {
 	testMu       sync.Mutex
 	testMode     *testmode.Manager
 	testReadRefs map[uint64]testReadRefs
+	testPrompts  map[int64]int
 }
 
 type testReadRefs struct {
@@ -71,6 +72,7 @@ func New(token string, requestTimeout, pollTimeout time.Duration, svc *service.S
 		chats:        make(map[int64]struct{}),
 		testMode:     testmode.New(),
 		testReadRefs: make(map[uint64]testReadRefs),
+		testPrompts:  make(map[int64]int),
 	}
 	b.loadChats()
 	return b
@@ -133,7 +135,7 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 	}
 	if text == "" {
 		if msg.Document != nil && b.testMode.IsAwaitingFile(msg.Chat.ID) {
-			return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
+			return b.handleTestFileUpload(ctx, msg.Chat.ID, msg.MessageID, *msg.Document)
 		}
 		return nil
 	}
@@ -212,16 +214,21 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 		b.addChat(msg.Chat.ID)
 		b.testMode.RequestFile(msg.Chat.ID)
 		if msg.Document != nil {
-			return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
+			return b.handleTestFileUpload(ctx, msg.Chat.ID, msg.MessageID, *msg.Document)
 		}
-		return b.sendMessage(ctx, msg.Chat.ID, "🧪 Test rejimi yoqildi. EPC ro'yxati bor .txt fayl yuboring.")
+		messageID, err := b.sendMessageWithID(ctx, msg.Chat.ID, "🧪 Test rejimi yoqildi. EPC ro'yxati bor .txt fayl yuboring.")
+		if err != nil {
+			return err
+		}
+		b.setTestPromptMessage(msg.Chat.ID, messageID)
+		return nil
 
 	case "/test_stop", "test_stop":
 		return b.handleTestStop(ctx, msg.Chat.ID)
 	}
 
 	if msg.Document != nil && b.testMode.IsAwaitingFile(msg.Chat.ID) {
-		return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
+		return b.handleTestFileUpload(ctx, msg.Chat.ID, msg.MessageID, *msg.Document)
 	}
 
 	return nil
@@ -480,10 +487,11 @@ type update struct {
 }
 
 type message struct {
-	Text     string    `json:"text"`
-	Caption  string    `json:"caption"`
-	Chat     chat      `json:"chat"`
-	Document *document `json:"document"`
+	MessageID int       `json:"message_id"`
+	Text      string    `json:"text"`
+	Caption   string    `json:"caption"`
+	Chat      chat      `json:"chat"`
+	Document  *document `json:"document"`
 }
 
 type chat struct {

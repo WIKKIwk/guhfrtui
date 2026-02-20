@@ -11,9 +11,12 @@ import (
 
 const maxTestFileSize = 2 << 20
 
-func (b *Bot) handleTestFileUpload(ctx context.Context, chatID int64, doc document) error {
+func (b *Bot) handleTestFileUpload(ctx context.Context, chatID int64, sourceMessageID int, doc document) error {
 	if !b.testMode.IsAwaitingFile(chatID) {
 		return b.sendMessage(ctx, chatID, "ℹ️ Avval /test buyrug'ini yuboring, keyin fayl tashlang.")
+	}
+	if sourceMessageID > 0 {
+		_ = b.deleteMessage(ctx, chatID, sourceMessageID)
 	}
 
 	fileName := strings.TrimSpace(doc.FileName)
@@ -23,12 +26,12 @@ func (b *Bot) handleTestFileUpload(ctx context.Context, chatID int64, doc docume
 
 	content, err := b.fetchTelegramFileContent(ctx, doc.FileID, maxTestFileSize)
 	if err != nil {
-		return b.sendMessage(ctx, chatID, "❌ Faylni olishda xato: "+err.Error())
+		return b.sendOrEditTestPrompt(ctx, chatID, "❌ Faylni olishda xato: "+err.Error())
 	}
 
 	stats, err := b.testMode.LoadFile(chatID, fileName, content)
 	if err != nil {
-		return b.sendMessage(ctx, chatID, "❌ Test boshlanmadi: "+err.Error())
+		return b.sendOrEditTestPrompt(ctx, chatID, "❌ Test boshlanmadi: "+err.Error())
 	}
 
 	// New file replaces previous test session in memory for this chat.
@@ -43,11 +46,12 @@ func (b *Bot) handleTestFileUpload(ctx context.Context, chatID int64, doc docume
 		stats.DuplicateLines,
 		stats.InvalidLines,
 	)
-	return b.sendMessage(ctx, chatID, text)
+	return b.sendOrEditTestPrompt(ctx, chatID, text)
 }
 
 func (b *Bot) handleTestStop(ctx context.Context, chatID int64) error {
 	b.addChat(chatID)
+	b.takeTestPromptMessage(chatID)
 
 	result, err := b.testMode.Stop(chatID)
 	if err != nil {
@@ -149,4 +153,34 @@ func (b *Bot) clearTestReadRefsForChat(chatID int64) {
 			delete(b.testReadRefs, sessionID)
 		}
 	}
+}
+
+func (b *Bot) setTestPromptMessage(chatID int64, messageID int) {
+	if chatID == 0 || messageID == 0 {
+		return
+	}
+	b.testMu.Lock()
+	b.testPrompts[chatID] = messageID
+	b.testMu.Unlock()
+}
+
+func (b *Bot) takeTestPromptMessage(chatID int64) int {
+	if chatID == 0 {
+		return 0
+	}
+	b.testMu.Lock()
+	defer b.testMu.Unlock()
+	messageID := b.testPrompts[chatID]
+	delete(b.testPrompts, chatID)
+	return messageID
+}
+
+func (b *Bot) sendOrEditTestPrompt(ctx context.Context, chatID int64, text string) error {
+	promptID := b.takeTestPromptMessage(chatID)
+	if promptID > 0 {
+		if err := b.editMessage(ctx, chatID, promptID, text); err == nil {
+			return nil
+		}
+	}
+	return b.sendMessage(ctx, chatID, text)
 }
