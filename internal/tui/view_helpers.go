@@ -14,18 +14,18 @@ func statusTag(status string) string {
 		strings.Contains(text, "timeout"),
 		strings.Contains(text, "disconnected"),
 		strings.Contains(text, "closed"):
-		return "[ERROR]"
+		return "[ERR]"
 	case strings.Contains(text, "no tag"),
 		strings.Contains(text, "stopped"),
 		strings.Contains(text, "idle"),
 		strings.Contains(text, "antenna check"):
-		return "[WARN ]"
+		return "[WARN]"
 	case strings.Contains(text, "connected"),
 		strings.Contains(text, "running"),
 		strings.Contains(text, "started"),
 		strings.Contains(text, "new tag"),
 		strings.Contains(text, "received"):
-		return "[ OK  ]"
+		return "[OK]"
 	default:
 		return "[INFO ]"
 	}

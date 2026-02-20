@@ -65,10 +65,10 @@ func main() {
 	startupRefs := tg.SendStartupNotice(ctx, "Bot ishga tushdi. Cache yangilanmoqda...")
 	if err := svc.RefreshCache(ctx, "startup", false); err != nil {
 		log.Printf("[bot] startup cache refresh failed: %v", err)
-		tg.EditNotices(ctx, startupRefs, "Bot ishga tushdi, lekin cache yangilashda xato: "+err.Error())
+		tg.EditNotices(ctx, startupRefs, "Cache yangilashda xato: "+err.Error())
 	} else {
 		st := svc.Status()
-		tg.EditNotices(ctx, startupRefs, fmt.Sprintf("Bot ishga tushdi. Cache yangilandi: draft=%d, epc=%d", st.DraftCount, st.CacheSize))
+		tg.EditNotices(ctx, startupRefs, fmt.Sprintf("Cache yangilandi: draft=%d, epc=%d", st.DraftCount, st.CacheSize))
 	}
 
 	if cfg.ScanDefaultActive {

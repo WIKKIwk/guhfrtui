@@ -10,17 +10,6 @@ const backHomeLine = "◀ 0. Back to Home"
 func (m Model) View() string {
 	contentWidth := m.panelContentWidth()
 
-	headerPanel := renderPanel(
-		"",
-		[]string{
-			"ST-8508 Reader TUI",
-			m.tabsLine(),
-			m.metaLine(),
-			m.statusLine(),
-		},
-		contentWidth,
-	)
-
 	page := m.pageLines()
 	pageTitle := "Page"
 	pageBody := []string{}
@@ -29,19 +18,25 @@ func (m Model) View() string {
 		pageBody = page[1:]
 	}
 	pageBody = m.clampPageBody(pageBody)
-	pagePanel := renderPanel(pageTitle, pageBody, contentWidth)
 
-	footerPanel := renderPanel(
+	lines := make([]string, 0, 12+len(pageBody))
+	lines = append(lines,
+		"ST-8508 Reader TUI",
+		m.tabsLine(),
+		m.metaLine(),
+		m.statusLine(),
+		sectionDivider(contentWidth),
+		"["+strings.ToUpper(strings.TrimSpace(pageTitle))+"]",
 		"",
-		[]string{"Keys: " + m.footerLine()},
-		contentWidth,
+	)
+	lines = append(lines, pageBody...)
+	lines = append(lines,
+		"",
+		sectionDivider(contentWidth),
+		"Keys: "+m.footerLine(),
 	)
 
-	layout := strings.Join([]string{
-		headerPanel,
-		pagePanel,
-		footerPanel,
-	}, "\n")
+	layout := renderPanel("", lines, contentWidth)
 	return paintLayout(layout)
 }
 
@@ -55,14 +50,10 @@ func (m Model) clampPageBody(lines []string) []string {
 		height = 24
 	}
 
-	headerLines := panelLineCount("", 4)
-	footerLines := panelLineCount("", 1)
-	availableForPagePanel := height - headerLines - footerLines
-	if availableForPagePanel < 7 {
-		availableForPagePanel = 7
-	}
-
-	bodyLimit := availableForPagePanel - panelLineCount("page-title", 0)
+	// Single-panel layout:
+	// 2 frame lines + header/meta/status(4) + two separators + page title + blanks + keys line.
+	fixedLines := 12
+	bodyLimit := height - fixedLines
 	if bodyLimit < 1 {
 		bodyLimit = 1
 	}
@@ -93,6 +84,13 @@ func (m Model) clampPageBody(lines []string) []string {
 	clipped = append(clipped, lines[:bodyLimit-1]...)
 	clipped = append(clipped, fmt.Sprintf("... %d more line(s)", len(lines)-bodyLimit+1))
 	return clipped
+}
+
+func sectionDivider(width int) string {
+	if width < 8 {
+		width = 8
+	}
+	return strings.Repeat("─", width)
 }
 
 func panelLineCount(title string, bodyLines int) int {

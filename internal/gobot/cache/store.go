@@ -1,6 +1,9 @@
 package cache
 
-import "sync"
+import (
+	"sort"
+	"sync"
+)
 
 type Store struct {
 	mu   sync.RWMutex
@@ -67,4 +70,16 @@ func (s *Store) Size() int {
 	size := len(s.epcs)
 	s.mu.RUnlock()
 	return size
+}
+
+// SnapshotSorted returns a stable sorted snapshot of cached EPC values.
+func (s *Store) SnapshotSorted() []string {
+	s.mu.RLock()
+	out := make([]string, 0, len(s.epcs))
+	for epc := range s.epcs {
+		out = append(out, epc)
+	}
+	s.mu.RUnlock()
+	sort.Strings(out)
+	return out
 }

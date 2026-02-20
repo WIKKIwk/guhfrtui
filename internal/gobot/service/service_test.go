@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -170,5 +171,30 @@ func TestRefreshCacheNotifiesWhenDraftCountIncreasesWithoutNewEPC(t *testing.T) 
 	last := notifier.messages[len(notifier.messages)-1]
 	if !strings.Contains(last, "draft +1") {
 		t.Fatalf("expected draft +1 message, got %q", last)
+	}
+}
+
+func TestRecentSeenEPCsReturnsSortedSnapshot(t *testing.T) {
+	svc := New(testConfig(), nil, cache.New())
+
+	_ = svc.HandleEPC(context.Background(), "e200001122334455", "test")
+	_ = svc.HandleEPC(context.Background(), "  E200001122334450  ", "test")
+
+	got := svc.RecentSeenEPCs()
+	want := []string{"E200001122334450", "E200001122334455"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("seen snapshot mismatch: got %v want %v", got, want)
+	}
+}
+
+func TestDraftEPCsReturnsSortedSnapshot(t *testing.T) {
+	c := cache.New()
+	c.Add([]string{"E300002", "E300001", "E300003"})
+	svc := New(testConfig(), nil, c)
+
+	got := svc.DraftEPCs()
+	want := []string{"E300001", "E300002", "E300003"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("draft snapshot mismatch: got %v want %v", got, want)
 	}
 }
