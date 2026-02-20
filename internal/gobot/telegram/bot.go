@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"new_era_go/internal/gobot/service"
+	"new_era_go/internal/gobot/testmode"
 )
 
 type Bot struct {
@@ -30,6 +31,15 @@ type Bot struct {
 
 	mu    sync.Mutex
 	chats map[int64]struct{}
+
+	testMu       sync.Mutex
+	testMode     *testmode.Manager
+	testReadRefs map[uint64]testReadRefs
+}
+
+type testReadRefs struct {
+	chatID     int64
+	messageIDs []int
 }
 
 type Scanner interface {
@@ -50,15 +60,17 @@ func New(token string, requestTimeout, pollTimeout time.Duration, svc *service.S
 	}
 
 	b := &Bot{
-		token:       strings.TrimSpace(token),
-		baseURL:     "https://api.telegram.org/bot" + strings.TrimSpace(token),
-		http:        &http.Client{Timeout: requestTimeout},
-		pollTimeout: pollTimeout,
-		svc:         svc,
-		scanner:     scanner,
-		chatsFile:   chatsFile,
-		notifyRetry: 2,
-		chats:       make(map[int64]struct{}),
+		token:        strings.TrimSpace(token),
+		baseURL:      "https://api.telegram.org/bot" + strings.TrimSpace(token),
+		http:         &http.Client{Timeout: requestTimeout},
+		pollTimeout:  pollTimeout,
+		svc:          svc,
+		scanner:      scanner,
+		chatsFile:    chatsFile,
+		notifyRetry:  2,
+		chats:        make(map[int64]struct{}),
+		testMode:     testmode.New(),
+		testReadRefs: make(map[uint64]testReadRefs),
 	}
 	b.loadChats()
 	return b
@@ -111,11 +123,22 @@ func (b *Bot) Notify(text string) {
 
 func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 	msg := upd.Message
-	if msg.Chat.ID == 0 || strings.TrimSpace(msg.Text) == "" {
+	if msg.Chat.ID == 0 {
 		return nil
 	}
 
-	cmd, args := parseCommand(msg.Text)
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		text = strings.TrimSpace(msg.Caption)
+	}
+	if text == "" {
+		if msg.Document != nil && b.testMode.IsAwaitingFile(msg.Chat.ID) {
+			return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
+		}
+		return nil
+	}
+
+	cmd, args := parseCommand(text)
 	switch cmd {
 	case "/start", "/help":
 		b.addChat(msg.Chat.ID)
@@ -129,7 +152,9 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 			"/cache - draft/epc snapshot fayllarini yozish 📁\n" +
 			"/range20 on|off|status - long-range profil 📡\n" +
 			"/range20_on | /range20_off - tez yoqish/o'chirish ⚡\n" +
-			"/turbo - cache ni darrov yangilash 🚀"
+			"/turbo - cache ni darrov yangilash 🚀\n" +
+			"/test - EPC test uchun txt fayl kutish 🧪\n" +
+			"/test_stop - testni yakunlash va natijani olish 🛑"
 		return b.sendMessage(ctx, msg.Chat.ID, text)
 
 	case "/scan":
@@ -182,6 +207,21 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 			return b.sendMessage(ctx, msg.Chat.ID, "❌ Turbo xato: "+err.Error())
 		}
 		return b.sendMessage(ctx, msg.Chat.ID, "✅ Turbo tayyor: cache yangilandi.")
+
+	case "/test":
+		b.addChat(msg.Chat.ID)
+		b.testMode.RequestFile(msg.Chat.ID)
+		if msg.Document != nil {
+			return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
+		}
+		return b.sendMessage(ctx, msg.Chat.ID, "🧪 Test rejimi yoqildi. EPC ro'yxati bor .txt fayl yuboring.")
+
+	case "/test_stop", "test_stop":
+		return b.handleTestStop(ctx, msg.Chat.ID)
+	}
+
+	if msg.Document != nil && b.testMode.IsAwaitingFile(msg.Chat.ID) {
+		return b.handleTestFileUpload(ctx, msg.Chat.ID, *msg.Document)
 	}
 
 	return nil
@@ -440,10 +480,18 @@ type update struct {
 }
 
 type message struct {
-	Text string `json:"text"`
-	Chat chat   `json:"chat"`
+	Text     string    `json:"text"`
+	Caption  string    `json:"caption"`
+	Chat     chat      `json:"chat"`
+	Document *document `json:"document"`
 }
 
 type chat struct {
 	ID int64 `json:"id"`
+}
+
+type document struct {
+	FileID   string `json:"file_id"`
+	FileName string `json:"file_name"`
+	FileSize int64  `json:"file_size"`
 }

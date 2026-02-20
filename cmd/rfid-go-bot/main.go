@@ -54,11 +54,15 @@ func main() {
 
 	// Keep scanner manager available for Telegram/HTTP commands regardless of ingest backend.
 	// In ingest mode we still avoid wiring scanner into IPC start/stop flow to prevent duplicate readers.
+	var tg *telegram.Bot
 	scanner := reader.New(cfg, func(epc string) {
 		svc.HandleEPC(context.Background(), epc, "sdk")
+		if tg != nil {
+			tg.OnReaderEPC(epc)
+		}
 	}, nil)
 
-	tg := telegram.New(cfg.BotToken, cfg.RequestTimeout, cfg.PollTimeout, svc, scanner)
+	tg = telegram.New(cfg.BotToken, cfg.RequestTimeout, cfg.PollTimeout, svc, scanner)
 	svc.SetNotifier(tg)
 	scanner.SetNotifier(tg.Notify)
 

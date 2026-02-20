@@ -91,6 +91,26 @@ func (b *Bot) editMessage(ctx context.Context, chatID int64, messageID int, text
 	return nil
 }
 
+func (b *Bot) deleteMessage(ctx context.Context, chatID int64, messageID int) error {
+	form := url.Values{}
+	form.Set("chat_id", strconv.FormatInt(chatID, 10))
+	form.Set("message_id", strconv.Itoa(messageID))
+
+	body, err := b.telegramFormPost(ctx, "/deleteMessage", form)
+	if err != nil {
+		return err
+	}
+
+	var resp telegramBoolEnvelope
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return fmt.Errorf("telegram deleteMessage decode: %w", err)
+	}
+	if !resp.OK {
+		return fmt.Errorf("telegram deleteMessage not ok: %s", strings.TrimSpace(resp.Description))
+	}
+	return nil
+}
+
 func (b *Bot) telegramFormPost(ctx context.Context, path string, form url.Values) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.baseURL+path, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -117,4 +137,10 @@ type telegramMessageEnvelope struct {
 	Result      struct {
 		MessageID int `json:"message_id"`
 	} `json:"result"`
+}
+
+type telegramBoolEnvelope struct {
+	OK          bool   `json:"ok"`
+	Description string `json:"description"`
+	Result      bool   `json:"result"`
 }
