@@ -18,17 +18,17 @@ func (b *Bot) handleCacheDump(ctx context.Context, chatID int64) error {
 
 	draftFile, seenFile, err := writeCacheDumpFiles(logDir, time.Now(), draftEPCs, seenEPCs)
 	if err != nil {
-		return b.sendMessage(ctx, chatID, "Cache dump yozishda xato: "+err.Error())
+		return b.sendMessage(ctx, chatID, "❌ Cache dump yozishda xato: "+err.Error())
 	}
 
-	if err := b.sendMessage(ctx, chatID, fmt.Sprintf("Cache dump tayyor. 2 ta fayl yuborilyapti.\nDraft EPC: %d\nSeen EPC: %d", len(draftEPCs), len(seenEPCs))); err != nil {
+	if err := b.sendMessage(ctx, chatID, fmt.Sprintf("📁 Cache dump tayyor. 2 ta fayl yuborilyapti.\nDraft EPC: %d\nSeen EPC: %d", len(draftEPCs), len(seenEPCs))); err != nil {
 		return err
 	}
 	if err := b.sendDocument(ctx, chatID, draftFile, "Draft snapshot"); err != nil {
-		return b.sendMessage(ctx, chatID, "Draft fayl yuborilmadi: "+err.Error())
+		return b.sendMessage(ctx, chatID, "❌ Draft fayl yuborilmadi: "+err.Error())
 	}
 	if err := b.sendDocument(ctx, chatID, seenFile, "Seen EPC snapshot"); err != nil {
-		return b.sendMessage(ctx, chatID, "Seen EPC fayl yuborilmadi: "+err.Error())
+		return b.sendMessage(ctx, chatID, "❌ Seen EPC fayl yuborilmadi: "+err.Error())
 	}
 	return nil
 }

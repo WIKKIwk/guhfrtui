@@ -62,13 +62,13 @@ func main() {
 	svc.SetNotifier(tg)
 	scanner.SetNotifier(tg.Notify)
 
-	startupRefs := tg.SendStartupNotice(ctx, "Bot ishga tushdi. Cache yangilanmoqda...")
+	startupRefs := tg.SendStartupNotice(ctx, "🤖 Bot ishga tushdi. Cache yangilanmoqda...")
 	if err := svc.RefreshCache(ctx, "startup", false); err != nil {
 		log.Printf("[bot] startup cache refresh failed: %v", err)
-		tg.EditNotices(ctx, startupRefs, "Cache yangilashda xato: "+err.Error())
+		tg.EditNotices(ctx, startupRefs, "❌ Cache yangilashda xato: "+err.Error())
 	} else {
 		st := svc.Status()
-		tg.EditNotices(ctx, startupRefs, fmt.Sprintf("Cache yangilandi: draft=%d, epc=%d", st.DraftCount, st.CacheSize))
+		tg.EditNotices(ctx, startupRefs, fmt.Sprintf("✅ Cache yangilandi: draft=%d, epc=%d", st.DraftCount, st.CacheSize))
 	}
 
 	if cfg.ScanDefaultActive {
@@ -86,7 +86,7 @@ func main() {
 			log.Printf("[bot] auto scan start failed: %v", err)
 		} else {
 			svc.SetScanActive(true, "auto_scan")
-			tg.Notify("Auto scan boshlandi.")
+			tg.Notify("🛰️ Auto scan boshlandi.")
 		}
 	}
 

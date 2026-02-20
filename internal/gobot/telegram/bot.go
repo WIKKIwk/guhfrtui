@@ -119,17 +119,17 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 	switch cmd {
 	case "/start", "/help":
 		b.addChat(msg.Chat.ID)
-		text := "RFID Go bot tayyor.\n" +
-			"Buyruqlar:\n" +
-			"/scan - reader scan ni boshlash\n" +
+		text := "🤖 RFID Go bot tayyor.\n" +
+			"📚 Buyruqlar:\n" +
+			"/scan - reader scan ni boshlash ▶️\n" +
 			"/read - /scan bilan bir xil (start)\n" +
 			"/read stop - /stop bilan bir xil\n" +
-			"/stop - reader scan ni to'xtatish\n" +
-			"/status - holat\n" +
-			"/cache - draft/epc snapshot fayllarini yozish\n" +
-			"/range20 on|off|status - long-range profil\n" +
-			"/range20_on | /range20_off - tez yoqish/o'chirish\n" +
-			"/turbo - cache ni darrov yangilash"
+			"/stop - reader scan ni to'xtatish ⏹️\n" +
+			"/status - holat ℹ️\n" +
+			"/cache - draft/epc snapshot fayllarini yozish 📁\n" +
+			"/range20 on|off|status - long-range profil 📡\n" +
+			"/range20_on | /range20_off - tez yoqish/o'chirish ⚡\n" +
+			"/turbo - cache ni darrov yangilash 🚀"
 		return b.sendMessage(ctx, msg.Chat.ID, text)
 
 	case "/scan":
@@ -175,13 +175,13 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 
 	case "/turbo":
 		b.addChat(msg.Chat.ID)
-		if err := b.sendMessage(ctx, msg.Chat.ID, "Turbo rejim: ERPNext dan cache yangilanmoqda..."); err != nil {
+		if err := b.sendMessage(ctx, msg.Chat.ID, "🚀 Turbo rejim: ERPNext dan cache yangilanmoqda..."); err != nil {
 			return err
 		}
 		if err := b.svc.RefreshCache(ctx, "telegram_turbo", false); err != nil {
-			return b.sendMessage(ctx, msg.Chat.ID, "Turbo xato: "+err.Error())
+			return b.sendMessage(ctx, msg.Chat.ID, "❌ Turbo xato: "+err.Error())
 		}
-		return b.sendMessage(ctx, msg.Chat.ID, "Turbo tayyor: cache yangilandi.")
+		return b.sendMessage(ctx, msg.Chat.ID, "✅ Turbo tayyor: cache yangilandi.")
 	}
 
 	return nil
@@ -190,15 +190,15 @@ func (b *Bot) handleUpdate(ctx context.Context, upd update) error {
 func (b *Bot) handleScanStart(ctx context.Context, chatID int64, reason string) error {
 	b.addChat(chatID)
 	if err := b.svc.RefreshCache(ctx, reason, false); err != nil {
-		_ = b.sendMessage(ctx, chatID, "Ogohlantirish: cache refresh xato: "+err.Error())
+		_ = b.sendMessage(ctx, chatID, "⚠️ Ogohlantirish: cache refresh xato: "+err.Error())
 	}
 	replay := b.svc.SetScanActive(true, reason)
 	if b.scanner != nil {
 		if err := b.scanner.Start(ctx); err != nil {
-			return b.sendMessage(ctx, chatID, fmt.Sprintf("Scan active, lekin reader start xato: %v", err))
+			return b.sendMessage(ctx, chatID, fmt.Sprintf("❌ Scan active, lekin reader start xato: %v", err))
 		}
 	}
-	return b.sendMessage(ctx, chatID, fmt.Sprintf("Scan boshlandi. Replay navbati: %d", replay))
+	return b.sendMessage(ctx, chatID, fmt.Sprintf("✅ Scan boshlandi. Replay navbati: %d", replay))
 }
 
 func (b *Bot) handleScanStop(ctx context.Context, chatID int64, reason string) error {
@@ -207,18 +207,18 @@ func (b *Bot) handleScanStop(ctx context.Context, chatID int64, reason string) e
 		b.scanner.Stop()
 	}
 	b.svc.SetScanActive(false, reason)
-	return b.sendMessage(ctx, chatID, "Scan to'xtatildi.")
+	return b.sendMessage(ctx, chatID, "⏹️ Scan to'xtatildi.")
 }
 
 func (b *Bot) handleRange20(ctx context.Context, chatID int64, args []string) error {
 	b.addChat(chatID)
 	if b.scanner == nil {
-		return b.sendMessage(ctx, chatID, "Reader manager topilmadi. /range20 faqat SDK scanner bilan ishlaydi.")
+		return b.sendMessage(ctx, chatID, "⚠️ Reader manager topilmadi. /range20 faqat SDK scanner bilan ishlaydi.")
 	}
 
 	tuner, ok := b.scanner.(RangeTuner)
 	if !ok {
-		return b.sendMessage(ctx, chatID, "Reader buyrug'i qo'llab-quvvatlanmaydi: /range20 mavjud emas.")
+		return b.sendMessage(ctx, chatID, "⚠️ Reader buyrug'i qo'llab-quvvatlanmaydi: /range20 mavjud emas.")
 	}
 
 	action := "status"
@@ -232,32 +232,32 @@ func (b *Bot) handleRange20(ctx context.Context, chatID int64, args []string) er
 		if tuner.LongRangeMode() {
 			state = "on"
 		}
-		return b.sendMessage(ctx, chatID, "range20 holati: "+state+"\n\nReader:\n"+b.scanner.StatusText())
+		return b.sendMessage(ctx, chatID, "📡 range20 holati: "+state+"\n\nReader:\n"+b.scanner.StatusText())
 
 	case "on", "1", "start", "enable":
 		summary := tuner.SetLongRangeMode(true)
 		if b.svc.ScanActive() {
 			b.scanner.Stop()
 			if err := b.scanner.Start(ctx); err != nil {
-				return b.sendMessage(ctx, chatID, summary+"\nReader restart xato: "+err.Error())
+				return b.sendMessage(ctx, chatID, summary+"\n❌ Reader restart xato: "+err.Error())
 			}
-			return b.sendMessage(ctx, chatID, summary+"\nQo'llandi va reader qayta ishga tushirildi.")
+			return b.sendMessage(ctx, chatID, "✅ "+summary+"\nQo'llandi va reader qayta ishga tushirildi.")
 		}
-		return b.sendMessage(ctx, chatID, summary+"\nQo'llandi. Real ta'sir /scan bilan ishga tushganda ko'rinadi.")
+		return b.sendMessage(ctx, chatID, "✅ "+summary+"\nQo'llandi. Real ta'sir /scan bilan ishga tushganda ko'rinadi.")
 
 	case "off", "0", "stop", "disable":
 		summary := tuner.SetLongRangeMode(false)
 		if b.svc.ScanActive() {
 			b.scanner.Stop()
 			if err := b.scanner.Start(ctx); err != nil {
-				return b.sendMessage(ctx, chatID, summary+"\nReader restart xato: "+err.Error())
+				return b.sendMessage(ctx, chatID, summary+"\n❌ Reader restart xato: "+err.Error())
 			}
-			return b.sendMessage(ctx, chatID, summary+"\nQo'llandi va reader qayta ishga tushirildi.")
+			return b.sendMessage(ctx, chatID, "✅ "+summary+"\nQo'llandi va reader qayta ishga tushirildi.")
 		}
-		return b.sendMessage(ctx, chatID, summary)
+		return b.sendMessage(ctx, chatID, "✅ "+summary)
 	}
 
-	return b.sendMessage(ctx, chatID, "Foydalanish: /range20 on | /range20 off | /range20 status")
+	return b.sendMessage(ctx, chatID, "ℹ️ Foydalanish: /range20 on | /range20 off | /range20 status")
 }
 
 func (b *Bot) getUpdates(ctx context.Context, offset int64) ([]update, error) {
