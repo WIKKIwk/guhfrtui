@@ -293,28 +293,8 @@ func (b *Bot) getUpdates(ctx context.Context, offset int64) ([]update, error) {
 }
 
 func (b *Bot) sendMessage(ctx context.Context, chatID int64, text string) error {
-	form := url.Values{}
-	form.Set("chat_id", strconv.FormatInt(chatID, 10))
-	form.Set("text", text)
-	form.Set("disable_web_page_preview", "true")
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.baseURL+"/sendMessage", strings.NewReader(form.Encode()))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := b.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
-		return fmt.Errorf("telegram sendMessage HTTP %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
+	_, err := b.sendMessageWithID(ctx, chatID, text)
+	return err
 }
 
 func (b *Bot) addChat(chatID int64) {
